@@ -1,0 +1,850 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Zombie Waves</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; background: #0c1316; }
+  body { font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #fff; user-select: none; -webkit-user-select: none; }
+  canvas { display: block; touch-action: none; cursor: crosshair; }
+  .hud { position: fixed; pointer-events: none; text-shadow: 0 2px 4px #000c; }
+  #wave { top: max(12px, env(safe-area-inset-top)); left: 16px; font-weight: 800; font-size: 28px; line-height: 1.1; }
+  #wave small { display: block; font-size: 14px; font-weight: 600; opacity: .8; }
+  #gen { top: max(14px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); width: min(260px, 40vw); text-align: center; font-size: 11px; font-weight: 800; letter-spacing: .14em; }
+  .bar { height: 10px; border-radius: 6px; background: #0009; border: 1px solid #ffffff40; overflow: hidden; margin-top: 3px; }
+  .bar i { display: block; height: 100%; width: 100%; background: linear-gradient(90deg, #2fd8c0, #9ffff0); transition: width .2s; }
+  #team { top: max(12px, env(safe-area-inset-top)); right: 14px; font-size: 13px; width: 170px; }
+  #team div { display: grid; grid-template-columns: 1fr 44px 22px; gap: 7px; align-items: center; }
+  #team .bar { height: 6px; margin: 0; } #team .bar i { background: #7ee081; }
+  #team .down { opacity: .5; } #team .mine { color: #ffd166; font-weight: 700; }
+  #me { bottom: max(18px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); width: min(300px, 56vw); text-align: center; font-weight: 700; font-size: 13px; }
+  #me .bar { height: 14px; } #me .bar i { background: linear-gradient(90deg, #ff4d5e, #ff9a6b); }
+  #msg { top: 26%; left: 0; right: 0; text-align: center; font-size: 38px; font-weight: 900; letter-spacing: .02em; }
+  #msg small { display: block; font-size: 16px; font-weight: 600; opacity: .85; }
+  #hint { bottom: calc(max(18px, env(safe-area-inset-bottom)) + 56px); left: 0; right: 0; text-align: center; font-size: 15px; transition: opacity .6s; }
+  #net { bottom: max(10px, env(safe-area-inset-bottom)); left: 14px; font-size: 12px; opacity: .75; }
+  #hurt { position: fixed; inset: 0; pointer-events: none; box-shadow: inset 0 0 140px #ff1f3d; opacity: 0; transition: opacity .35s; }
+  #over { position: fixed; inset: 0; display: grid; place-items: center; background: #050a0cb0; }
+  #over[hidden], .stick[hidden] { display: none; }
+  .card { width: min(360px, 90vw); max-height: 86vh; overflow: auto; padding: 20px; border-radius: 16px; background: #16211f; border: 1px solid #ffffff2a; text-align: center; }
+  .card h2 { margin: 0; font-size: 26px; color: #ff6b6b; } .card h3 { margin: 14px 0 4px; font-size: 13px; color: #9ffff0; text-align: left; }
+  .card ol { margin: 0; padding-left: 24px; font-size: 14px; text-align: left; }
+  .card li span { float: right; font-variant-numeric: tabular-nums; } .card li.mine { color: #ffd166; font-weight: 700; }
+  .card p { margin: 10px 0 0; font-size: 13px; opacity: .75; }
+  button.go { width: 100%; min-height: 48px; margin-top: 16px; border: 0; border-radius: 12px; background: #2fd8c0; color: #04211c; font: 800 17px system-ui, sans-serif; cursor: pointer; }
+  .stick { position: fixed; width: 120px; height: 120px; margin: -60px 0 0 -60px; border-radius: 50%; border: 2px solid #ffffff55; background: #ffffff12; pointer-events: none; }
+  .stick i { position: absolute; left: 34px; top: 34px; width: 52px; height: 52px; border-radius: 50%; background: #ffffff70; }
+  @media (max-width: 640px) {
+    #gen { top: calc(max(12px, env(safe-area-inset-top)) + 58px); left: 16px; transform: none; width: 130px; text-align: left; }
+    #team { width: 140px; font-size: 12px; } #msg { font-size: 30px; }
+    #me { bottom: calc(max(18px, env(safe-area-inset-bottom)) + 24px); }
+  }
+</style>
+<script src="https://cdn.multiplayeragent.com/sdk/mp.global.js"></script>
+<script type="importmap">{ "imports": { "three": "./libs/three.module.min.js" } }</script>
+</head>
+<body>
+<div class="hud" id="wave"></div>
+<div class="hud" id="gen">GENERATOR<div class="bar"><i id="genBar"></i></div></div>
+<div class="hud" id="team"></div>
+<div class="hud" id="me"><span id="meText"></span><div class="bar"><i id="hpBar"></i></div></div>
+<div class="hud" id="msg"></div>
+<div class="hud" id="hint"></div>
+<div class="hud" id="net">Connecting…</div>
+<div id="hurt"></div>
+<div class="stick" id="stickMove" hidden><i></i></div>
+<div class="stick" id="stickAim" hidden><i></i></div>
+<div id="over" hidden><div class="card">
+  <h2>The base fell</h2><div id="overSub"></div>
+  <h3>Your team</h3><ol id="results"></ol>
+  <h3>Highest waves reached</h3><ol id="board"><li>Loading…</li></ol>
+  <button class="go" id="again">Play again</button><p id="next"></p>
+</div></div>
+<script type="module">
+/* ═══ ZOMBIE WAVES · a Multiplayer Agent starter ═══════════════════════════════════════
+ * Hold the base against bigger and bigger waves. Co-op, 1–4 players; bots fill the team.
+ *
+ * WHERE THINGS ARE (search for the "── " headers):
+ *   CONFIG ........ waves, zombies, weapons, the team size
+ *   CONNECTION .... MP_CONNECT, joining, the offline room, who is host
+ *   WORLD ......... ground, the base and its generator, fence, trees (all drawn in code)
+ *   SURVIVORS ..... the survivor model, name tags, the downed/revive ring
+ *   ZOMBIES ....... how zombies are packed into state, and how they are drawn (instanced)
+ *   EFFECTS ....... bullets, particles, sounds
+ *   WAVES (HOST) .. waves, zombie brains, bites, bots. Only the host writes these.
+ *   ME ............ moving, shooting, being bitten, getting revived. Each player writes its own.
+ *   HUD & RESULTS . wave, generator, team, results, leaderboard
+ *   INPUT ......... keyboard + mouse, and twin thumb sticks on touch
+ *
+ * HOW THE MULTIPLAYER WORKS (a relay room: no server code, the HOST's browser runs the horde):
+ *   - Each player writes its OWN entity: `p` (one packed JSON field: x, z, aim, hp, down,
+ *     shots, revive) about 10 times a second, `hb` (heartbeat) once a second, and
+ *     `n`/`c` (name, color) once. Each player owns its own health.
+ *   - The HOST is the lowest sessionId among live players (heartbeat seen in the last 3s),
+ *     worked out every frame. Only the host writes the shared fields:
+ *       `wave`  {id, v, phase: break|fight|over, n, endsAt}: written only on a change; v goes up
+ *       `z0`..`z2` every zombie, packed 9 characters each (see ZOMBIES), 10 times a second
+ *       `base`  {hp, kills, queue}: generator health, kills per player, zombies still to come
+ *       `bots`  the AI teammates, 10 times a second
+ *     A new host adopts all of it from state and carries on: same wave, same zombies.
+ *   - You shoot on your own screen. When your bullet hits a zombie you send a `hit` intent
+ *     {z: zombie id}; the host takes the health off (and applies its own hits directly).
+ *   - Zombies bite by event: the host sends `bite` {to, d} (the damage of the last 250ms) and
+ *     only the bitten player takes it off its own health. The host bites bots directly.
+ *   - Downed? A teammate standing next to you for a few seconds gets you up. You check that
+ *     yourself, from everyone's positions in state. Every new wave gets everyone back up.
+ *   - `again` (intent): a player pressed Play again on the results card.
+ *   - ?attract plays offline with bots only (the preview video is recorded from it).
+ *   - Leaderboard "best-wave": the wave each player reached, shown when the base falls.
+ */
+import * as THREE from "three";
+
+// ── CONFIG ──────────────────────────────────────────────────────────────────────────
+const CONFIG = {
+  team: 4,               // bots fill the team up to this many survivors
+  arena: 30,             // survivors stay within this radius of the generator
+  spawnRadius: 35,       // zombies shamble in from this far out
+  maxAlive: 60,          // most zombies on the field at once (the rest wait their turn)
+  startWave: 1,          // the wave a new game starts on
+  firstBreak: 3000,      // ms before the first wave
+  breakMs: 6000,         // ms between waves
+  resultsMs: 15000,      // ms the results show before a new game starts on its own
+  waveSize: 8,           // zombies in wave 1 ...
+  waveGrow: 4,           // ... and this many more every wave
+  spawnEvery: 0.5,       // seconds between zombie spawns in wave 1 ...
+  spawnFaster: 0.035,    // ... this much less every wave (down to 0.15)
+  zombieSpeed: 2.1,      // walker speed, units/s (runners are faster, brutes slower)
+  zombieSpeedGrow: 0.1,  // extra speed per wave
+  zombieHp: 3,           // walker health, +1 every 2 waves
+  biteDamage: 12,        // health one bite takes (brutes bite twice as hard)
+  aggro: 14,             // zombies chase survivors closer than this, else go for the generator
+  genHp: 50,             // generator health: the game ends when it hits 0
+  hp: 100,               // survivor health
+  speed: 6.5,            // survivor walk speed, units/s
+  fireRate: 8,           // shots per second while the trigger is held
+  bulletSpeed: 70,       // units/s
+  spread: 0.05,          // radians of random aim wobble
+  botFireRate: 2.6,      // bot shots per second
+  botWobble: 0.32,       // radians a bot's aim wanders
+  reviveRange: 1.8,      // stand this close to a downed teammate ...
+  reviveTime: 2.5,       // ... for this many seconds to get them back up
+  board: "best-wave",    // leaderboard name
+};
+const BOT_NAMES = ["Sarge", "Doc", "Rook", "Ace", "Patch"];
+const COLORS = ["#ffb347", "#5ab0ff", "#ff6b9a", "#7ee081", "#c79bff", "#ffe066"];
+
+// ── CONNECTION ──────────────────────────────────────────────────────────────────────
+// The builder fills these in for this game. Downloaded from GitHub? Put your own pk_ key here.
+const MP_CONNECT = {
+  key: 'pk_REPLACE_ME',
+  room: 'zombie-waves',
+  endpoint: 'wss://live.multiplayeragent.com',
+  apiUrl: 'https://api.multiplayeragent.com',
+};
+const ATTRACT = new URLSearchParams(location.search).has("attract");
+
+/** Same shape as the SDK client, kept in this tab: offline play and ?attract. */
+function localRoom() {
+  const id = "local", state = { entities: { players: { [id]: {} } }, shared: {} }, subs = [];
+  let queued = false;
+  const emit = () => { if (!queued) { queued = true; queueMicrotask(() => { queued = false; subs.forEach((f) => f(state)); }); } };
+  const put = (o, k, v) => { if (typeof k === "object") Object.assign(o, k); else o[k] = v; emit(); };
+  return {
+    sessionId: id, state, offline: true,
+    me: { set: (k, v) => put(state.entities.players[id], k, v) },
+    setShared: (k, v) => put(state.shared, k, v),
+    onState: (f) => { subs.push(f); f(state); }, onJoin() {}, onLeave() {}, on() {}, send() {},
+    onDisconnect() {}, onReconnect() {}, leave: async () => {},
+  };
+}
+async function connect() {
+  if (ATTRACT || typeof MP === "undefined") return localRoom();
+  try {
+    const mp = await Promise.race([MP.join({ ...MP_CONNECT }), new Promise((_, no) => setTimeout(() => no(new Error("timed out")), 10000))]);
+    window.mp = mp; // the builder calls window.mp.leave() when the page closes
+    return mp;
+  } catch (e) {
+    console.warn("Playing offline:", e && e.message);
+    return localRoom();
+  }
+}
+const parse = (v, fb) => { if (typeof v !== "string") return fb; try { return JSON.parse(v); } catch { return fb; } };
+const parsed = new Map();
+/** A JSON value from state, parsed once per change (read-only: never mutate what this returns). */
+function parseOnce(key, raw, fallback) {
+  const c = parsed.get(key);
+  if (c && c.raw === raw) return c.v;
+  const v = parse(raw, fallback); parsed.set(key, { raw, v }); return v;
+}
+let net = null, S = { entities: { players: {} }, shared: {} };
+const seenHb = new Map();
+/** Players whose heartbeat moved in the last 3s (plus us), sorted by sessionId. */
+function livePlayers() {
+  const now = performance.now(), out = [];
+  for (const [id, p] of Object.entries(S.entities.players || {})) {
+    const s = seenHb.get(id);
+    if (!s || s.hb !== p.hb) seenHb.set(id, { hb: p.hb, at: now });
+    if (id === net.sessionId || now - seenHb.get(id).at < 3000) out.push(id);
+  }
+  return out.sort();
+}
+const isHost = () => livePlayers()[0] === net.sessionId;
+
+// ── WORLD ───────────────────────────────────────────────────────────────────────────
+const TAU = Math.PI * 2;
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1));
+renderer.shadowMap.enabled = true;
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color("#0c1316");
+scene.fog = new THREE.Fog("#0c1316", 34, 80);
+const camera = new THREE.PerspectiveCamera(50, 1, 0.5, 220);
+function fit() {
+  renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight;
+  camera.fov = innerHeight > innerWidth ? 62 : 50; camera.updateProjectionMatrix();
+}
+addEventListener("resize", fit); addEventListener("orientationchange", fit); fit();
+scene.add(new THREE.HemisphereLight("#9db8dd", "#26301f", 1.2));
+const moon = new THREE.DirectionalLight("#d4e2ff", 1.6);
+moon.position.set(-22, 40, 18); moon.castShadow = true; moon.shadow.mapSize.set(1024, 1024);
+Object.assign(moon.shadow.camera, { left: -36, right: 36, top: 36, bottom: -36, near: 1, far: 110 });
+scene.add(moon);
+
+function canvasTex(w, h, paint, repeat) {
+  const c = document.createElement("canvas"); c.width = w; c.height = h; paint(c.getContext("2d"), w, h);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+  if (repeat) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(repeat, repeat); }
+  return t;
+}
+function mulberry32(a) { return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+const seeded = mulberry32(11); // the same scenery for everyone
+const mesh = (geo, mat, x = 0, y = 0, z = 0) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); return m; };
+
+const dirt = canvasTex(256, 256, (c, w, h) => {
+  c.fillStyle = "#2b3826"; c.fillRect(0, 0, w, h);
+  for (let i = 0; i < 1600; i++) { c.fillStyle = ["#33432c", "#25301f", "#3a3b2a", "#2f3d27"][i % 4]; c.fillRect(seeded() * w, seeded() * h, 2 + seeded() * 5, 2 + seeded() * 5); }
+}, 34);
+const ground = mesh(new THREE.PlaneGeometry(220, 220), new THREE.MeshStandardMaterial({ map: dirt, roughness: 1 }));
+ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
+// The base: a concrete pad with hazard stripes, the generator in the middle.
+const concrete = canvasTex(256, 256, (c, w, h) => {
+  c.fillStyle = "#5d6461"; c.fillRect(0, 0, w, h);
+  for (let i = 0; i < 900; i++) { c.fillStyle = `rgba(0,0,0,${seeded() * 0.12})`; c.fillRect(seeded() * w, seeded() * h, 3, 3); }
+  c.strokeStyle = "#00000044"; c.lineWidth = 2; for (let g = 0; g <= w; g += 64) { c.beginPath(); c.moveTo(g, 0); c.lineTo(g, h); c.moveTo(0, g); c.lineTo(w, g); c.stroke(); }
+}, 3);
+const pad = mesh(new THREE.CircleGeometry(8, 48), new THREE.MeshStandardMaterial({ map: concrete, roughness: 0.95 }), 0, 0.02, 0);
+pad.rotation.x = -Math.PI / 2; pad.receiveShadow = true; scene.add(pad);
+const stripes = canvasTex(64, 16, (c) => { c.fillStyle = "#f5c400"; c.fillRect(0, 0, 64, 16); c.fillStyle = "#151515"; c.beginPath(); c.moveTo(0, 0); c.lineTo(28, 0); c.lineTo(44, 16); c.lineTo(16, 16); c.fill(); }, 1);
+const ringGeo = new THREE.RingGeometry(8, 8.7, 96, 1), ringUv = ringGeo.attributes.uv;
+for (let j = 0; j <= 1; j++) for (let i = 0; i <= 96; i++) ringUv.setXY(j * 97 + i, i / 96 * 40, j); // stripes run around the ring
+const ring = mesh(ringGeo, new THREE.MeshStandardMaterial({ map: stripes }), 0, 0.03, 0);
+ring.rotation.x = -Math.PI / 2; scene.add(ring);
+
+const gen = new THREE.Group(); scene.add(gen);
+const metal = new THREE.MeshStandardMaterial({ color: "#6b787e", roughness: 0.55, metalness: 0.25 });
+const coreMat = new THREE.MeshStandardMaterial({ color: "#2fd8c0", emissive: "#2fd8c0", emissiveIntensity: 1.6 });
+gen.add(mesh(new THREE.BoxGeometry(2.6, 0.6, 2.6), metal, 0, 0.3, 0), mesh(new THREE.CylinderGeometry(0.62, 0.62, 2.2, 20), coreMat, 0, 1.7, 0), mesh(new THREE.BoxGeometry(1.6, 0.3, 1.6), metal, 0, 2.9, 0));
+const genRings = [0, 1].map((i) => { const r = mesh(new THREE.TorusGeometry(1.05, 0.07, 8, 36), coreMat, 0, 1.2 + i * 1.0, 0); r.rotation.x = Math.PI / 2; gen.add(r); return r; });
+gen.children.forEach((m) => { m.castShadow = true; });
+const genLight = new THREE.PointLight("#5fffe0", 70, 34, 2); genLight.position.y = 3; gen.add(genLight);
+// Lamp posts on the pad corners (glowing bulbs, no extra lights).
+for (let i = 0; i < 4; i++) {
+  const a = TAU * (i + 0.5) / 4, x = Math.sin(a) * 7.2, z = Math.cos(a) * 7.2;
+  scene.add(mesh(new THREE.CylinderGeometry(0.1, 0.12, 4, 6), metal, x, 2, z), mesh(new THREE.SphereGeometry(0.28, 10, 8), new THREE.MeshBasicMaterial({ color: "#ffe9a8" }), x, 4.1, z));
+}
+// A broken fence at the edge of the arena, dark pines and rocks beyond it.
+function scatter(geo, mat, count, place) {
+  const m = new THREE.InstancedMesh(geo, mat, count), mtx = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();
+  for (let i = 0; i < count; i++) { const [x, y, z, s, ry, tilt] = place(i); mtx.compose(new THREE.Vector3(x, y, z), q.setFromEuler(e.set(tilt, ry, tilt * 0.5)), new THREE.Vector3(s, s, s)); m.setMatrixAt(i, mtx); }
+  m.castShadow = true; scene.add(m); return m;
+}
+const wood = new THREE.MeshStandardMaterial({ color: "#4a3a2b", roughness: 1 });
+scatter(new THREE.BoxGeometry(0.25, 1.6, 0.25), wood, 64, (i) => { const a = TAU * i / 64; return seeded() < 0.3 ? [0, -9, 0, 1, 0, 0] : [Math.sin(a) * 31.5, 0.7, Math.cos(a) * 31.5, 1, a, (seeded() - 0.5) * 0.5]; });
+const ringSpot = (min, max) => { const a = seeded() * TAU, r = min + seeded() * (max - min); return [Math.sin(a) * r, Math.cos(a) * r]; };
+scatter(new THREE.ConeGeometry(1.7, 6.5, 6), new THREE.MeshStandardMaterial({ color: "#18261e", flatShading: true }), 140, () => { const [x, z] = ringSpot(36, 80), s = 0.7 + seeded() * 0.9; return [x, 3.2 * s, z, s, seeded() * TAU, 0]; });
+scatter(new THREE.DodecahedronGeometry(1, 0), new THREE.MeshStandardMaterial({ color: "#4b5050", flatShading: true }), 50, () => { const [x, z] = ringSpot(33, 70), s = 0.4 + seeded() * 1.2; return [x, s * 0.4, z, s, seeded() * TAU, seeded()]; });
+
+// ── SURVIVORS ───────────────────────────────────────────────────────────────────────
+const skinMat = new THREE.MeshStandardMaterial({ color: "#f1c7a0", roughness: 0.7 });
+const darkMat = new THREE.MeshStandardMaterial({ color: "#2a2f3a", roughness: 0.8 });
+const gunMat = new THREE.MeshStandardMaterial({ color: "#15171c", roughness: 0.4, metalness: 0.5 });
+function nameTag(text) {
+  const tex = canvasTex(256, 64, (c) => { c.font = "bold 32px system-ui"; c.textAlign = "center"; c.lineWidth = 6; c.strokeStyle = "#000b"; c.strokeText(text, 128, 44); c.fillStyle = "#fff"; c.fillText(text, 128, 44); });
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false })); s.scale.set(4, 1, 1); s.position.y = 3; return s;
+}
+function makeSurvivor(color, name) {
+  const g = new THREE.Group(), body = new THREE.Group(), mat = new THREE.MeshStandardMaterial({ color, roughness: 0.6 });
+  body.add(mesh(new THREE.BoxGeometry(0.62, 0.8, 0.4), darkMat, 0, 0.4, 0), mesh(new THREE.BoxGeometry(0.82, 0.86, 0.5), mat, 0, 1.22, 0),
+    mesh(new THREE.SphereGeometry(0.3, 14, 10), skinMat, 0, 1.92, 0), mesh(new THREE.SphereGeometry(0.33, 14, 8, 0, TAU, 0, Math.PI / 2), mat, 0, 1.98, 0),
+    mesh(new THREE.BoxGeometry(0.14, 0.16, 0.95), gunMat, 0.3, 1.28, 0.55));
+  body.children.forEach((m) => { m.castShadow = true; });
+  const flash = mesh(new THREE.SphereGeometry(0.2, 8, 6), new THREE.MeshBasicMaterial({ color: "#fff2a0" }), 0.3, 1.28, 1.15); flash.visible = false; body.add(flash);
+  const feet = mesh(new THREE.RingGeometry(0.55, 0.72, 28), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8 }), 0, 0.04, 0);
+  const help = mesh(new THREE.RingGeometry(1.5, 1.7, 36), new THREE.MeshBasicMaterial({ color: "#ff5d5d", transparent: true }), 0, 0.05, 0);
+  const fill = mesh(new THREE.CircleGeometry(1.5, 36), new THREE.MeshBasicMaterial({ color: "#7ee081", transparent: true, opacity: 0.45 }), 0, 0.06, 0);
+  for (const m of [feet, help, fill]) m.rotation.x = -Math.PI / 2;
+  g.add(body, feet, help, fill);
+  if (name) g.add(nameTag(name));
+  g.userData = { body, flash, help, fill, firedAt: 0, walk: 0, px: 0, pz: 0 };
+  scene.add(g); return g;
+}
+/** Put a survivor model where survivor `s` is: standing, shooting, or down waiting for a revive. */
+function poseSurvivor(g, s, t) {
+  const u = g.userData, moved = Math.hypot(s.x - u.px, s.z - u.pz);
+  u.walk += moved * 2.6; u.px = s.x; u.pz = s.z;
+  g.position.set(s.x, 0, s.z); g.rotation.y = s.a;
+  u.body.rotation.x = s.down ? -Math.PI / 2 : 0;
+  u.body.position.y = s.down ? 0.3 : Math.abs(Math.sin(u.walk)) * 0.1;
+  u.help.visible = u.fill.visible = !!s.down;
+  if (s.down) { u.help.material.opacity = 0.55 + Math.sin(t * 6) * 0.35; u.fill.scale.setScalar(Math.max(0.01, s.revive || 0)); }
+  u.flash.visible = performance.now() - u.firedAt < 45;
+}
+
+// ── ZOMBIES ─────────────────────────────────────────────────────────────────────────
+// On the wire every zombie is 9 characters: id(2) x(2) z(2) heading(1) hp(1) type(1),
+// numbers in base 36, positions to 0.1 units. Each field starts with "z" so it never looks
+// like a number, and holds up to PER_FIELD zombies (2048 characters max per field).
+const ZFIELDS = ["z0", "z1", "z2"], PER_FIELD = 200;
+const b36 = (n, w) => Math.max(0, Math.round(n)).toString(36).padStart(w, "0").slice(-w);
+function packZombies(list) {
+  return "z" + list.map((z) => b36(z.id, 2) + b36((z.x + 64) * 10, 2) + b36((z.z + 64) * 10, 2) +
+    b36((((z.h % TAU) + TAU) % TAU) / TAU * 36, 1) + b36(Math.min(35, Math.ceil(z.hp)), 1) + z.type).join("");
+}
+function unpackZombies(str) {
+  const out = [];
+  if (typeof str !== "string") return out;
+  for (let i = 1; i + 9 <= str.length; i += 9) {
+    const n = (a, b) => parseInt(str.slice(i + a, i + b), 36);
+    out.push({ id: n(0, 2), x: n(2, 4) / 10 - 64, z: n(4, 6) / 10 - 64, h: n(6, 7) / 36 * TAU, hp: n(7, 8), type: str[i + 8] });
+  }
+  return out;
+}
+let zRead = { raw: null, list: [] };
+function readZombies() {
+  const raw = ZFIELDS.map((f) => S.shared[f]).join("|");
+  if (raw !== zRead.raw) zRead = { raw, list: ZFIELDS.flatMap((f) => unpackZombies(S.shared[f])) };
+  return zRead.list;
+}
+const KINDS = { n: { size: 1, speed: 1, hp: 1 }, r: { size: 0.86, speed: 1.75, hp: 0.6 }, b: { size: 1.5, speed: 0.72, hp: 4.5 } }; // walker, runner, brute
+
+// Drawn with one InstancedMesh per body part, so a hundred zombies cost a handful of draw calls.
+const MAXZ = 160;
+function zPart(geo, color, per) {
+  const m = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ color: color || "#ffffff", roughness: 0.9 }), MAXZ * per);
+  m.castShadow = true; m.frustumCulled = false; m.count = 0;
+  if (!color) for (let i = 0; i < MAXZ * per; i++) m.setColorAt(i, new THREE.Color("#fff"));
+  scene.add(m); return m;
+}
+const zBody = zPart(new THREE.BoxGeometry(0.72, 0.85, 0.44), null, 1);
+const zHead = zPart(new THREE.BoxGeometry(0.46, 0.46, 0.46), null, 1);
+const zArm = zPart(new THREE.BoxGeometry(0.17, 0.17, 0.78).translate(0, 0, 0.36), null, 2);
+const zLeg = zPart(new THREE.BoxGeometry(0.24, 0.8, 0.26).translate(0, -0.4, 0), "#33383f", 2);
+const SHIRTS = ["#6b7f4a", "#7a5a3c", "#4a5f7a", "#8a4a4a", "#5d5d5d", "#7a6d3c"].map((c) => new THREE.Color(c));
+const SKINS = { n: new THREE.Color("#8fae6e"), r: new THREE.Color("#b8c98d"), b: new THREE.Color("#7f95a0") };
+const WHITE = new THREE.Color("#fff"), BRUTE_SHIRT = new THREE.Color("#4a2224");
+const zViews = new Map(); // zombie id -> what this screen draws: eased position, hit flash, death fall
+
+/** Ease every zombie toward where state says it is; ones that vanished from state fall over. */
+function syncZombies(dt) {
+  const seen = new Set(), k = host.acting ? 1 : 1 - Math.pow(0.003, dt);
+  for (const z of zombieList()) {
+    seen.add(z.id);
+    let v = zViews.get(z.id);
+    if (!v || v.dead) { v = { x: z.x, z: z.z, h: z.h, hp: z.hp, type: z.type, flash: 0, dead: 0, walk: Math.random() * 6, shirt: z.type === "b" ? BRUTE_SHIRT : SHIRTS[z.id % SHIRTS.length], skin: SKINS[z.type] || SKINS.n }; zViews.set(z.id, v); }
+    if (z.hp < v.hp) { v.flash = 0.1; burst(v.x, 1.4, v.z, "#7fbf4a", 3); }
+    v.hp = z.hp;
+    const px = v.x, pz = v.z;
+    v.x += (z.x - v.x) * k; v.z += (z.z - v.z) * k; v.h += Math.atan2(Math.sin(z.h - v.h), Math.cos(z.h - v.h)) * k;
+    v.walk += Math.hypot(v.x - px, v.z - pz) * 2.8 / (KINDS[v.type]?.size || 1);
+  }
+  for (const [id, v] of zViews) if (!seen.has(id) && !v.dead) { v.dead = 0.001; burst(v.x, 1.2, v.z, "#6aa040", 10, 5); burst(v.x, 1.0, v.z, "#7a1f1f", 6, 4); }
+}
+const M = new THREE.Matrix4(), L = new THREE.Matrix4(), Q = new THREE.Quaternion(), E = new THREE.Euler(0, 0, 0, "YXZ");
+const P3 = new THREE.Vector3(), S3 = new THREE.Vector3(), ONE = new THREE.Vector3(1, 1, 1);
+function putPart(part, i, x, y, z, rx) { E.set(rx, 0, 0); Q.setFromEuler(E); L.compose(P3.set(x, y, z), Q, ONE).premultiply(M); part.setMatrixAt(i, L); }
+function drawZombies(dt, t) {
+  let i = 0;
+  for (const [id, v] of zViews) {
+    if (v.dead) { v.dead += dt; if (v.dead > 1.8) { zViews.delete(id); continue; } }
+    if (i >= MAXZ) continue;
+    const s = KINDS[v.type]?.size || 1, fall = v.dead ? Math.min(1, v.dead * 2.5) * 1.5 : 0, sink = v.dead > 1 ? (v.dead - 1) * 0.9 : 0;
+    E.set(fall, v.h, 0); Q.setFromEuler(E); M.compose(P3.set(v.x, -sink, v.z), Q, S3.set(s, s, s));
+    const step = Math.sin(v.walk), sway = Math.sin(t * 3 + id) * 0.12;
+    putPart(zBody, i, 0, 1.22, 0, 0.14);
+    putPart(zHead, i, 0, 1.86, 0.1, 0.25);
+    putPart(zArm, i * 2, -0.44, 1.45, 0.05, -0.08 + sway); putPart(zArm, i * 2 + 1, 0.44, 1.45, 0.05, -0.08 - sway);
+    putPart(zLeg, i * 2, -0.18, 0.8, 0, step * 0.55); putPart(zLeg, i * 2 + 1, 0.18, 0.8, 0, -step * 0.55);
+    const lit = v.flash > 0; v.flash -= dt;
+    zBody.setColorAt(i, lit ? WHITE : v.shirt); zHead.setColorAt(i, lit ? WHITE : v.skin);
+    zArm.setColorAt(i * 2, lit ? WHITE : v.skin); zArm.setColorAt(i * 2 + 1, lit ? WHITE : v.skin);
+    i++;
+  }
+  for (const [part, n] of [[zBody, i], [zHead, i], [zArm, i * 2], [zLeg, i * 2]]) {
+    part.count = n; part.instanceMatrix.needsUpdate = true; if (part.instanceColor) part.instanceColor.needsUpdate = true;
+  }
+}
+
+// ── EFFECTS ─────────────────────────────────────────────────────────────────────────
+// Bullets fly on every screen. Only the shooter's own bullets (and, on the host, the bots')
+// count: they report hits. Everyone else's are just tracers that stop at the first zombie.
+const MAXB = 220, bullets = [];
+const bulletMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(0.09, 0.09, 1.2), new THREE.MeshBasicMaterial({ color: "#fff1a8" }), MAXB);
+bulletMesh.frustumCulled = false; bulletMesh.count = 0; scene.add(bulletMesh);
+/** A bullet from (x, z) toward heading a. `owner` = who it counts for, or null for a tracer. */
+function fire(x, z, a, owner) {
+  if (bullets.length >= MAXB) bullets.shift();
+  bullets.push({ x: x + Math.sin(a) * 1.0 + Math.cos(a) * 0.3, z: z + Math.cos(a) * 1.0 - Math.sin(a) * 0.3, a, life: 0.5, owner });
+}
+/** The first zombie a bullet's path crosses this frame, or null. */
+function zombieOnPath(b, step) {
+  const dx = Math.sin(b.a), dz = Math.cos(b.a);
+  let best = null, bt = Infinity;
+  for (const [id, v] of zViews) {
+    if (v.dead) continue;
+    const r = 0.5 * (KINDS[v.type]?.size || 1), t = Math.max(0, Math.min(step, (v.x - b.x) * dx + (v.z - b.z) * dz));
+    if ((b.x + dx * t - v.x) ** 2 + (b.z + dz * t - v.z) ** 2 < r * r && t < bt) { bt = t; best = id; }
+  }
+  return best;
+}
+function stepBullets(dt) {
+  let n = 0;
+  for (let i = bullets.length - 1; i >= 0; i--) {
+    const b = bullets[i], step = CONFIG.bulletSpeed * dt, hit = zombieOnPath(b, step);
+    if (hit !== null) {
+      const v = zViews.get(hit); v.flash = 0.08; burst(v.x, 1.3, v.z, "#9be05a", 3, 3);
+      if (b.owner === net.sessionId) shotHit(hit); else if (b.owner && host.acting) applyHit(hit, 1, b.owner);
+      bullets.splice(i, 1); continue;
+    }
+    b.x += Math.sin(b.a) * step; b.z += Math.cos(b.a) * step; b.life -= dt;
+    if (b.life <= 0) { bullets.splice(i, 1); continue; }
+  }
+  for (const b of bullets) { E.set(0, b.a, 0); Q.setFromEuler(E); M.compose(P3.set(b.x, 1.28, b.z), Q, ONE); bulletMesh.setMatrixAt(n++, M); }
+  bulletMesh.count = n; bulletMesh.instanceMatrix.needsUpdate = true;
+}
+// Particles: little cubes that pop, fall and shrink.
+const MAXP = 500, bits = [], colorCache = new Map();
+const bitMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(0.16, 0.16, 0.16), new THREE.MeshBasicMaterial(), MAXP);
+bitMesh.frustumCulled = false; bitMesh.count = 0; for (let i = 0; i < MAXP; i++) bitMesh.setColorAt(i, WHITE); scene.add(bitMesh);
+function burst(x, y, z, color, n, speed = 3) {
+  if (!colorCache.has(color)) colorCache.set(color, new THREE.Color(color));
+  for (let i = 0; i < n; i++) {
+    if (bits.length >= MAXP) bits.shift();
+    const a = Math.random() * TAU, s = speed * (0.4 + Math.random());
+    bits.push({ x, y, z, vx: Math.sin(a) * s, vy: 1.5 + Math.random() * speed, vz: Math.cos(a) * s, life: 0.5 + Math.random() * 0.4, c: colorCache.get(color) });
+  }
+}
+function stepBits(dt) {
+  let n = 0;
+  for (let i = bits.length - 1; i >= 0; i--) {
+    const p = bits[i]; p.life -= dt;
+    if (p.life <= 0) { bits.splice(i, 1); continue; }
+    p.vy -= 14 * dt; p.x += p.vx * dt; p.y = Math.max(0.08, p.y + p.vy * dt); p.z += p.vz * dt;
+    if (p.y <= 0.08) { p.vx *= 0.8; p.vz *= 0.8; }
+  }
+  for (const p of bits) { const s = Math.min(1, p.life * 2.5); M.compose(P3.set(p.x, p.y, p.z), Q.identity(), S3.set(s, s, s)); bitMesh.setMatrixAt(n, M); bitMesh.setColorAt(n++, p.c); }
+  bitMesh.count = n; bitMesh.instanceMatrix.needsUpdate = true; if (bitMesh.instanceColor) bitMesh.instanceColor.needsUpdate = true;
+}
+let audio = null; // made on the first tap or key (browsers block sound before that)
+function sfx(kind) {
+  if (!audio || ATTRACT) return;
+  const [f0, f1, dur, vol, type] = { shot: [260, 70, 0.06, 0.035, "square"], hurt: [160, 50, 0.25, 0.12, "sawtooth"], wave: [330, 660, 0.4, 0.08, "triangle"], down: [300, 60, 0.6, 0.1, "sawtooth"] }[kind];
+  const t = audio.currentTime, o = audio.createOscillator(), g = audio.createGain();
+  o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g).connect(audio.destination); o.start(t); o.stop(t + dur);
+}
+
+// ── WAVES (HOST) ────────────────────────────────────────────────────────────────────
+const host = { acting: false, last: null, zombies: new Map(), nextId: 0, gen: CONFIG.genHp, queue: 0, kills: {}, bots: new Map(),
+  spawnIn: 0, lastZ: 0, lastBots: 0, lastBase: 0, lastBite: 0, baseDirty: false, again: false, written: [], bites: {} };
+/** The wave as state has it, or the host's own newer write that hasn't come back yet. `v` only goes up. */
+function wave() {
+  const w = parseOnce("wave", S.shared.wave, null);
+  return host.last && isHost() && (!w || host.last.v > w.v) ? host.last : w;
+}
+function writeWave(w) { w = { ...w, v: (wave()?.v ?? 0) + 1 }; host.last = w; net.setShared("wave", JSON.stringify(w)); return w; }
+const readBase = () => parseOnce("base", S.shared.base, { hp: CONFIG.genHp, kills: {}, queue: 0 });
+const readBots = () => parseOnce("bots", S.shared.bots, []);
+const zombieList = () => (host.acting ? [...host.zombies.values()] : readZombies());
+const baseNow = () => (host.acting ? { hp: host.gen, kills: host.kills, queue: host.queue } : readBase());
+const botList = () => (host.acting ? [...host.bots.values()] : readBots());
+const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
+
+/** Become host: take over the zombies, the generator and the bots exactly as state has them. */
+function adopt() {
+  host.acting = true; host.last = null; host.zombies.clear(); host.bots.clear();
+  for (const z of readZombies()) host.zombies.set(z.id, { ...z, cd: 0.5, target: null, retarget: 0 });
+  host.nextId = (Math.max(-1, ...host.zombies.keys()) + 1) % 1296;
+  const b = readBase(); host.gen = b.hp; host.kills = { ...b.kills }; host.queue = b.queue;
+  readBots().forEach((b, i) => host.bots.set(b.id, { ...b, cd: 0, post: TAU * i / CONFIG.team }));
+  host.written = ZFIELDS.map((f) => S.shared[f]);
+}
+function newGame() {
+  host.zombies.clear(); host.gen = CONFIG.genHp; host.queue = 0; host.kills = {}; host.baseDirty = true;
+  for (const b of host.bots.values()) Object.assign(b, { x: Math.sin(b.post) * 5, z: Math.cos(b.post) * 5, hp: CONFIG.hp, down: 0, revive: 0 });
+}
+/** Bots fill the team up to CONFIG.team; one leaves when a person joins. A bot never wears a person's color. */
+function fitBots() {
+  const humans = livePlayers().filter((id) => !(ATTRACT && id === net.sessionId)).length;
+  const want = Math.max(0, CONFIG.team - humans);
+  const people = new Set(team().filter((s) => !s.bot).map((s) => s.color));
+  for (const b of host.bots.values()) if (people.has(b.color)) { const used = new Set(team().map((s) => s.color)); b.color = COLORS.find((c) => !used.has(c)) || b.color; }
+  while (host.bots.size > want) host.bots.delete([...host.bots.keys()].pop());
+  while (host.bots.size < want) {
+    const taken = new Set([...team().map((s) => s.color)]), names = new Set([...host.bots.values()].map((b) => b.name));
+    const id = "b" + Math.random().toString(36).slice(2, 6), post = TAU * host.bots.size / CONFIG.team + 0.4;
+    host.bots.set(id, { id, name: BOT_NAMES.find((n) => !names.has(n)) || "Bot", color: COLORS.find((c) => !taken.has(c)) || "#ccc",
+      x: Math.sin(post) * 5, z: Math.cos(post) * 5, a: post, hp: CONFIG.hp, down: 0, shots: 0, revive: 0, cd: 0, post });
+  }
+}
+const waveSize = (n) => CONFIG.waveSize + CONFIG.waveGrow * (n - 1);
+const zombieSpeed = (type, n) => (CONFIG.zombieSpeed + CONFIG.zombieSpeedGrow * n) * (KINDS[type]?.speed || 1);
+function spawnZombie(n) {
+  const a = Math.random() * TAU, r = CONFIG.spawnRadius + Math.random() * 4, roll = Math.random();
+  const type = n >= 3 && roll < 0.1 ? "b" : roll < (n >= 2 ? 0.35 : 0.15) ? "r" : "n";
+  const hp = Math.min(35, Math.round((CONFIG.zombieHp + Math.floor(n / 2)) * KINDS[type].hp));
+  const id = host.nextId; host.nextId = (host.nextId + 1) % 1296;
+  host.zombies.set(id, { id, x: Math.sin(a) * r, z: Math.cos(a) * r, h: a + Math.PI, hp, type, cd: 0, target: null, retarget: 0 });
+}
+/** Every zombie: pick a target, shuffle toward it, keep apart from the others, bite. */
+function stepZombies(dt, w) {
+  const people = team().filter((s) => !s.down), list = [...host.zombies.values()];
+  for (const z of list) {
+    z.retarget -= dt;
+    if (z.retarget <= 0) {
+      z.retarget = 0.5; z.target = null;
+      let bd = (CONFIG.aggro * (z.type === "r" ? 1.5 : 1)) ** 2;
+      for (const p of people) { const d = (p.x - z.x) ** 2 + (p.z - z.z) ** 2; if (d < bd) { bd = d; z.target = p.id; } }
+    }
+    const p = z.target && people.find((s) => s.id === z.target);
+    const tx = p ? p.x : 0, tz = p ? p.z : 0, reach = p ? 1.0 : 2.1, s = KINDS[z.type]?.size || 1;
+    const dx = tx - z.x, dz = tz - z.z, d = Math.hypot(dx, dz) || 1;
+    z.h = Math.atan2(dx, dz);
+    if (d > reach) { const step = Math.min(d - reach, zombieSpeed(z.type, w.n) * dt); z.x += dx / d * step; z.z += dz / d * step; }
+    for (const o of list) {
+      if (o === z) continue;
+      const ox = z.x - o.x, oz = z.z - o.z, od = Math.hypot(ox, oz), min = 0.45 * (s + (KINDS[o.type]?.size || 1));
+      if (od < min && od > 0.001) { z.x += ox / od * (min - od) * 0.5; z.z += oz / od * (min - od) * 0.5; }
+    }
+    const fromGen = Math.hypot(z.x, z.z); if (fromGen < 1.9) { z.x *= 1.9 / fromGen; z.z *= 1.9 / fromGen; }
+    z.cd -= dt;
+    if (d <= reach + 0.2 && z.cd <= 0 && w.phase !== "over") { z.cd = 1.1; bite(p ? p.id : null, CONFIG.biteDamage * (z.type === "b" ? 2 : 1)); }
+  }
+}
+/** A zombie bites someone (or the generator, when `to` is null). */
+function bite(to, d) {
+  if (to === null) { host.gen = Math.max(0, host.gen - (d > CONFIG.biteDamage ? 2 : 1)); host.baseDirty = true; return; }
+  const bot = host.bots.get(to);
+  if (bot) { bot.hp -= d; if (bot.hp <= 0) Object.assign(bot, { hp: 0, down: 1, revive: 0 }); }
+  else if (to === net.sessionId) applyBite(d);
+  else host.bites[to] = (host.bites[to] || 0) + d; // sent 4 times a second, one event per bitten player
+}
+/** Damage on a zombie (from anyone's bullet). The kill counts for `by`. */
+function applyHit(id, d, by) {
+  const z = host.zombies.get(id);
+  if (!z) return;
+  z.hp -= d;
+  if (z.hp <= 0) { host.zombies.delete(id); host.kills[by] = (host.kills[by] || 0) + 1; host.baseDirty = true; }
+}
+/** Downed survivor `s` gets back up after a teammate stands next to it for reviveTime. */
+function reviveTick(s, everyone, dt) {
+  const helped = everyone.some((o) => o.id !== s.id && !o.down && dist(o, s) < CONFIG.reviveRange);
+  s.revive = helped ? s.revive + dt / CONFIG.reviveTime : Math.max(0, s.revive - dt * 0.3);
+  if (s.revive >= 1) Object.assign(s, { down: 0, hp: CONFIG.hp * 0.5, revive: 0 });
+}
+/** One bot's brain: hold a spot by the generator, revive downed friends, shoot the nearest zombie. */
+function stepBot(b, dt, everyone, zombies) {
+  if (b.down) { reviveTick(b, everyone, dt); return; }
+  const friend = everyone.find((o) => o.down && o.id !== b.id && dist(o, b) < 18);
+  let gx = Math.sin(b.post) * 6.5, gz = Math.cos(b.post) * 6.5, stop = 0.6, target = null, td = 20;
+  for (const z of zombies) { const d = dist(z, b); if (d < td) { td = d; target = z; } }
+  if (friend) { gx = friend.x; gz = friend.z; stop = 0.9; }
+  else if (target && td < 3.5) { gx = b.x + (b.x - target.x); gz = b.z + (b.z - target.z); } // back off
+  const dx = gx - b.x, dz = gz - b.z, d = Math.hypot(dx, dz);
+  if (d > stop) { const step = Math.min(d - stop, CONFIG.speed * 0.8 * dt); b.x += dx / d * step; b.z += dz / d * step; }
+  keepInArena(b);
+  b.post += dt * 0.05; b.cd -= dt;
+  if (!target) return;
+  const want = Math.atan2(target.x - b.x, target.z - b.z), diff = Math.atan2(Math.sin(want - b.a), Math.cos(want - b.a));
+  b.a += Math.max(-7 * dt, Math.min(7 * dt, diff));
+  if (Math.abs(diff) < 0.3 && b.cd <= 0) {
+    b.cd = (0.8 + Math.random() * 0.4) / CONFIG.botFireRate; b.shots = (b.shots + 1) % 1000;
+    fire(b.x, b.z, b.a + (Math.random() - 0.5) * CONFIG.botWobble, b.id);
+    const g = b === me ? me.g : views.get(b.id)?.g; if (g) g.userData.firedAt = performance.now();
+  }
+}
+function keepInArena(s) {
+  const r = Math.hypot(s.x, s.z);
+  if (r > CONFIG.arena) { s.x *= CONFIG.arena / r; s.z *= CONFIG.arena / r; }
+  if (r < 1.8 && r > 0.001) { s.x *= 1.8 / r; s.z *= 1.8 / r; }
+}
+
+function hostTick(dt, now) {
+  if (!host.acting) adopt();
+  let w = wave();
+  const t = Date.now();
+  if (!w) { newGame(); w = writeWave({ id: 1, phase: "break", n: CONFIG.startWave, endsAt: t + CONFIG.firstBreak }); }
+  fitBots();
+  if (w.phase === "break" && t >= w.endsAt) { w = writeWave({ ...w, phase: "fight", endsAt: 0 }); host.queue = waveSize(w.n); host.baseDirty = true; }
+  else if (w.phase === "fight") {
+    host.spawnIn -= dt;
+    if (host.queue > 0 && host.zombies.size < CONFIG.maxAlive && host.spawnIn <= 0) { spawnZombie(w.n); host.queue--; host.spawnIn = Math.max(0.15, CONFIG.spawnEvery - CONFIG.spawnFaster * w.n); host.baseDirty = true; }
+    if (host.gen <= 0) w = writeWave({ ...w, phase: "over", endsAt: t + CONFIG.resultsMs });
+    else if (!host.queue && !host.zombies.size) {
+      w = writeWave({ ...w, phase: "break", n: w.n + 1, endsAt: t + CONFIG.breakMs });
+      for (const b of host.bots.values()) Object.assign(b, { hp: CONFIG.hp, down: 0, revive: 0 });
+    }
+  } else if (w.phase === "over" && (t >= w.endsAt || host.again)) {
+    newGame(); w = writeWave({ id: w.id + 1, phase: "break", n: CONFIG.startWave, endsAt: t + CONFIG.firstBreak });
+  }
+  host.again = false;
+  stepZombies(dt, w);
+  const everyone = team(), zombies = [...host.zombies.values()];
+  for (const b of host.bots.values()) stepBot(b, dt, everyone, zombies);
+  if (now - host.lastZ > 100) { // ~10/s: one message per field that changed
+    host.lastZ = now;
+    ZFIELDS.forEach((f, i) => { const s = packZombies(zombies.slice(i * PER_FIELD, (i + 1) * PER_FIELD)); if (s !== host.written[i]) { host.written[i] = s; net.setShared(f, s); } });
+  }
+  if (now - host.lastBots > 100) {
+    host.lastBots = now;
+    net.setShared("bots", JSON.stringify(botList().map((b) => ({ id: b.id, name: b.name, color: b.color, x: +b.x.toFixed(2), z: +b.z.toFixed(2), a: +b.a.toFixed(2), hp: Math.round(b.hp), down: b.down, shots: b.shots, revive: +b.revive.toFixed(2) }))));
+  }
+  if (now - host.lastBite > 250) { host.lastBite = now; for (const [to, d] of Object.entries(host.bites)) net.send("bite", { to, d }); host.bites = {}; }
+  if (host.baseDirty && now - host.lastBase > 250) { host.lastBase = now; host.baseDirty = false; net.setShared("base", JSON.stringify(baseNow())); }
+}
+
+// ── ME ──────────────────────────────────────────────────────────────────────────────
+const myName = (() => { try { return localStorage.getItem("mpa-name") || ""; } catch { return ""; } })() ||
+  ["Brave", "Lucky", "Steady", "Rusty", "Quick", "Calm"][Math.floor(Math.random() * 6)] + " " + ["Fox", "Bear", "Hawk", "Wolf", "Moose", "Otter"][Math.floor(Math.random() * 6)];
+const me = { id: "", name: myName, color: COLORS[0], x: 0, z: 3, a: 0, hp: CONFIG.hp, down: 0, shots: 0, revive: 0, cd: 0, post: 0,
+  g: null, gameId: -1, phaseKey: "", lastSend: 0, submittedFor: -1, bannerUntil: 0, hurtAt: 0 };
+const input = { mx: 0, mz: 0, fire: false };
+
+/** Everyone on the team: live people from state, the bots, and me. */
+function team() {
+  const out = [], live = new Set(livePlayers());
+  for (const [id, p] of Object.entries(S.entities.players || {})) {
+    if (id === net.sessionId || !live.has(id)) continue;
+    const q = parseOnce("p:" + id, p.p, null);
+    if (q) out.push({ id, name: p.n || "Survivor", color: p.c || "#ccc", ...q });
+  }
+  for (const b of botList()) out.push({ ...b, bot: true });
+  out.push(me);
+  return out;
+}
+function spawnMe() {
+  const a = Math.random() * TAU; // somewhere around the generator
+  Object.assign(me, { x: Math.sin(a) * 3.4, z: Math.cos(a) * 3.4, a, hp: CONFIG.hp, down: 0, revive: 0, post: a });
+  zViews.clear(); bullets.length = 0;
+}
+/** A zombie bit me: I take it off my own health. */
+function applyBite(d) {
+  if (me.down) return;
+  me.hp -= d; me.hurtAt = performance.now(); burst(me.x, 1.3, me.z, "#d0293b", 6, 3); sfx("hurt");
+  if (me.hp <= 0) { Object.assign(me, { hp: 0, down: 1, revive: 0 }); sfx("down"); }
+  publish(true);
+}
+/** My bullet hit zombie `id`: tell the host (or, as host, apply it). */
+function shotHit(id) { if (host.acting) applyHit(id, 1, net.sessionId); else net.send("hit", { z: id }); }
+
+function myTick(dt, w) {
+  if (me.gameId !== w.id) { me.gameId = w.id; spawnMe(); }
+  const key = w.id + ":" + w.n + ":" + w.phase;
+  if (key !== me.phaseKey) {
+    me.phaseKey = key;
+    if (w.phase === "break") Object.assign(me, { hp: CONFIG.hp, down: 0, revive: 0 }); // everyone is back up between waves
+    if (w.phase === "fight") { me.bannerUntil = performance.now() + 1800; sfx("wave"); }
+  }
+  if (me.down) reviveTick(me, team(), dt);
+  else if (ATTRACT) stepBot(me, dt, team(), zombieList()); // the preview plays you like a bot
+  else {
+    const len = Math.hypot(input.mx, input.mz), k = len > 1 ? 1 / len : 1;
+    me.x += input.mx * k * CONFIG.speed * dt; me.z += input.mz * k * CONFIG.speed * dt;
+    keepInArena(me);
+    me.cd -= dt;
+    if (input.fire && me.cd <= 0) {
+      me.cd = 1 / CONFIG.fireRate; me.shots = (me.shots + 1) % 1000;
+      fire(me.x, me.z, me.a + (Math.random() - 0.5) * CONFIG.spread * 2, net.sessionId);
+      if (me.g) me.g.userData.firedAt = performance.now();
+      sfx("shot");
+    }
+  }
+  publish(false);
+}
+function publish(force) {
+  const now = performance.now();
+  if (!force && now - me.lastSend < 100) return; // ~10/s
+  me.lastSend = now;
+  net.me.set("p", JSON.stringify({ x: +me.x.toFixed(2), z: +me.z.toFixed(2), a: +me.a.toFixed(2), hp: Math.round(me.hp), down: me.down, shots: me.shots, revive: +me.revive.toFixed(2) }));
+}
+
+// Everyone else's survivors, eased toward where they last said they were. Their shots are tracers.
+const views = new Map(); // id -> { g, x, z, a, shots, hp }
+function syncSurvivors(dt, t) {
+  const seen = new Set(), k = 1 - Math.pow(0.0008, dt);
+  for (const s of team()) {
+    if (s === me) continue;
+    seen.add(s.id);
+    let v = views.get(s.id);
+    if (v && v.color !== s.color) { scene.remove(v.g); v = null; } // a new color: rebuild the model
+    if (!v) { v = { g: makeSurvivor(s.color, ATTRACT ? "" : s.name), color: s.color, x: s.x, z: s.z, a: s.a, shots: s.shots, hp: s.hp }; views.set(s.id, v); }
+    const snap = s.bot && host.acting;
+    v.x += (s.x - v.x) * (snap ? 1 : k); v.z += (s.z - v.z) * (snap ? 1 : k); v.a += Math.atan2(Math.sin(s.a - v.a), Math.cos(s.a - v.a)) * (snap ? 1 : k);
+    const fired = (s.shots - v.shots + 1000) % 1000; v.shots = s.shots;
+    if (fired && !snap) { for (let i = 0; i < Math.min(3, fired); i++) fire(v.x, v.z, v.a + (Math.random() - 0.5) * 0.1, null); v.g.userData.firedAt = performance.now(); }
+    if (s.hp < v.hp) burst(v.x, 1.3, v.z, "#d0293b", 5, 3);
+    v.hp = s.hp;
+    poseSurvivor(v.g, { ...s, x: v.x, z: v.z, a: v.a }, t);
+  }
+  for (const [id, v] of views) if (!seen.has(id)) { scene.remove(v.g); views.delete(id); }
+  if (me.g && me.g.userData.color !== me.color) { scene.remove(me.g); me.g = null; }
+  if (!me.g) { me.g = makeSurvivor(me.color, ""); me.g.userData.color = me.color; }
+  poseSurvivor(me.g, me, t);
+}
+/** Two people in one color: the one with the higher sessionId picks a free color. */
+function fixColor() {
+  const others = Object.entries(S.entities.players || {}).filter(([id]) => id !== net.sessionId);
+  if (!others.some(([id, p]) => p.c === me.color && id < net.sessionId)) return;
+  const taken = new Set(others.map(([, p]) => p.c)), free = COLORS.find((c) => !taken.has(c));
+  if (free) { me.color = free; net.me.set("c", free); }
+}
+
+// ── HUD & RESULTS ───────────────────────────────────────────────────────────────────
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+let board = null, lastGen = CONFIG.genHp, genHitAt = 0;
+const startedAt = performance.now();
+function hud(w) {
+  const b = baseNow(), now = performance.now(), t = Date.now();
+  if (b.hp < lastGen) genHitAt = now;
+  lastGen = b.hp;
+  $("hurt").style.opacity = now - me.hurtAt < 250 ? 0.8 : me.down ? 0.45 : 0;
+  if (ATTRACT) { for (const id of ["wave", "team", "msg", "hint", "net", "meText"]) $(id).textContent = ""; $("gen").style.display = $("me").style.display = "none"; return; }
+  const left = zombieList().length + (b.queue || 0);
+  $("wave").innerHTML = `Wave ${w.n}<small>${w.phase === "fight" ? `${left} zombie${left === 1 ? "" : "s"} left` : w.phase === "break" ? "Get ready" : ""}</small>`;
+  $("genBar").style.width = Math.max(0, 100 * b.hp / CONFIG.genHp) + "%";
+  $("genBar").style.background = now - genHitAt < 300 ? "#ff6b6b" : "";
+  $("meText").textContent = me.down ? "You're down! A teammate can get you up" : `${Math.round(me.hp)} HP`;
+  $("hpBar").style.width = Math.max(0, me.hp) + "%";
+  $("team").innerHTML = team().map((s) => `<div class="${s === me ? "mine" : ""} ${s.down ? "down" : ""}"><span>${esc(s === me ? "You" : s.name)}</span><span class="bar"><i style="width:${Math.max(0, s.hp)}%"></i></span><span>${b.kills?.[s.id] || 0}</span></div>`).join("");
+  $("msg").innerHTML = w.phase === "break" ? `Wave ${w.n} in ${Math.max(0, Math.ceil((w.endsAt - t) / 1000))}<small>${w.n > CONFIG.startWave ? "Everyone is back on their feet" : "Zombies come from every side"}</small>`
+    : w.phase === "fight" && now < me.bannerUntil ? `Wave ${w.n}` : w.phase === "fight" && now - genHitAt < 1500 ? `<small>The generator is under attack!</small>` : "";
+  const touch = matchMedia("(pointer: coarse)").matches;
+  $("hint").textContent = now - startedAt < 9000 ? (touch ? "Left thumb moves · right thumb aims and shoots · stand by a downed friend to revive" : "WASD to move · aim with the mouse · hold click to shoot · stand by a downed friend to revive") : "";
+  const n = livePlayers().length;
+  $("net").textContent = net.offline ? "Offline: playing with bots" : `Online · ${n} player${n === 1 ? "" : "s"}${isHost() ? " · you run the zombies" : ""}`;
+  $("over").hidden = w.phase !== "over";
+  if (w.phase === "over") {
+    $("overSub").textContent = `You held out until wave ${w.n}.`;
+    $("results").innerHTML = team().map((s) => ({ s, k: b.kills?.[s.id] || 0 })).sort((x, y) => y.k - x.k)
+      .map(({ s, k }) => `<li class="${s === me ? "mine" : ""}">${esc(s === me ? myName : s.name)}<span>${k} kills</span></li>`).join("");
+    $("next").textContent = `New game in ${Math.max(0, Math.ceil((w.endsAt - t) / 1000))}s`;
+    if (me.submittedFor !== w.id) { me.submittedFor = w.id; showBoard(w.n); }
+  }
+}
+function showBoard(reached) {
+  const list = $("board");
+  if (!board) { list.innerHTML = "<li>Leaderboards need a connection.</li>"; return; }
+  list.innerHTML = "<li>Loading…</li>";
+  board.submit(reached).catch(() => null).then(() => board.top(10)).then(({ entries }) => {
+    list.innerHTML = entries.length ? entries.map((e) => `<li>${esc(e.username || "Player")}<span>wave ${e.score}</span></li>`).join("") : "<li>No scores yet. You're first.</li>";
+  }).catch(() => { list.innerHTML = "<li>Couldn't load the leaderboard.</li>"; });
+}
+$("again").onclick = () => { if (isHost()) host.again = true; else net.send("again", {}); };
+
+// ── INPUT ───────────────────────────────────────────────────────────────────────────
+const keys = new Set(), mouse = { x: 0, y: 0, seen: false, down: false };
+const MOVE = { w: [0, -1], arrowup: [0, -1], s: [0, 1], arrowdown: [0, 1], a: [-1, 0], arrowleft: [-1, 0], d: [1, 0], arrowright: [1, 0] };
+addEventListener("keydown", (e) => { const k = e.key.toLowerCase(); if (MOVE[k] || k === " ") e.preventDefault(); keys.add(k); });
+addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
+addEventListener("blur", () => { keys.clear(); mouse.down = false; });
+addEventListener("pointerdown", () => { try { audio ||= new AudioContext(); } catch {} }, { once: true });
+const cv = renderer.domElement;
+// Twin thumb sticks: touch the left half to move, the right half to aim (and shoot).
+const sticks = { move: null, aim: null };
+cv.addEventListener("pointerdown", (e) => {
+  e.preventDefault();
+  if (e.pointerType === "mouse") { if (e.button === 0) mouse.down = true; return; }
+  const side = e.clientX < innerWidth / 2 ? "move" : "aim";
+  if (sticks[side]) return;
+  sticks[side] = { id: e.pointerId, x0: e.clientX, y0: e.clientY, dx: 0, dy: 0, el: $(side === "move" ? "stickMove" : "stickAim") };
+  Object.assign(sticks[side].el.style, { left: e.clientX + "px", top: e.clientY + "px" }); sticks[side].el.hidden = false;
+});
+cv.addEventListener("pointermove", (e) => {
+  if (e.pointerType === "mouse") { mouse.x = e.clientX; mouse.y = e.clientY; mouse.seen = true; return; }
+  for (const s of Object.values(sticks)) if (s && s.id === e.pointerId) {
+    let dx = e.clientX - s.x0, dy = e.clientY - s.y0; const d = Math.hypot(dx, dy);
+    if (d > 50) { dx *= 50 / d; dy *= 50 / d; }
+    s.dx = dx; s.dy = dy; s.el.firstChild.style.transform = `translate(${dx}px, ${dy}px)`;
+  }
+});
+for (const ev of ["pointerup", "pointercancel"]) addEventListener(ev, (e) => {
+  if (e.pointerType === "mouse") { if (e.button === 0) mouse.down = false; return; }
+  for (const side of ["move", "aim"]) if (sticks[side] && sticks[side].id === e.pointerId) { sticks[side].el.hidden = true; sticks[side] = null; }
+});
+document.addEventListener("touchmove", (e) => e.preventDefault(), { passive: false });
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2(), aimPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -1.28), aimAt = new THREE.Vector3();
+/** Turn keys, mouse and sticks into this frame's move, aim and trigger. */
+function readInput() {
+  input.mx = input.mz = 0;
+  for (const k of keys) if (MOVE[k]) { input.mx += MOVE[k][0]; input.mz += MOVE[k][1]; }
+  if (sticks.move) { input.mx = sticks.move.dx / 50; input.mz = sticks.move.dy / 50; }
+  const aimLen = sticks.aim ? Math.hypot(sticks.aim.dx, sticks.aim.dy) : 0;
+  if (aimLen > 10) me.a = Math.atan2(sticks.aim.dx, sticks.aim.dy);
+  else if (mouse.seen && !sticks.move) {
+    ndc.set(mouse.x / innerWidth * 2 - 1, -(mouse.y / innerHeight) * 2 + 1); ray.setFromCamera(ndc, camera);
+    if (ray.ray.intersectPlane(aimPlane, aimAt)) me.a = Math.atan2(aimAt.x - me.x, aimAt.z - me.z);
+  } else if (input.mx || input.mz) me.a = Math.atan2(input.mx, input.mz);
+  input.fire = aimLen > 22 || mouse.down || keys.has(" ");
+}
+
+// ── MAIN LOOP ───────────────────────────────────────────────────────────────────────
+let last = performance.now(), lastHb = 0, lastHud = 0;
+const focus = new THREE.Vector3(), camOff = new THREE.Vector3();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  const t = now / 1000;
+  if (now - lastHb > 1000) { lastHb = now; net.me.set("hb", Date.now()); fixColor(); }
+  if (isHost()) hostTick(dt, now); else host.acting = false;
+  const w = wave();
+  if (!ATTRACT) readInput();
+  if (w) myTick(dt, w);
+  syncZombies(dt); drawZombies(dt, t);
+  syncSurvivors(dt, t);
+  stepBullets(dt); stepBits(dt);
+  // the generator glows, spins, and flickers red when it is low
+  const g = baseNow().hp / CONFIG.genHp;
+  coreMat.emissive.setHSL(0.47 * Math.max(0, g), 0.8, 0.5); coreMat.emissiveIntensity = 1.4 + Math.sin(t * 4) * 0.3;
+  genRings[0].rotation.z += dt * 1.5; genRings[1].rotation.z -= dt * 1.1;
+  genLight.color.copy(coreMat.emissive); genLight.intensity = 60 + Math.sin(t * 4) * 12 - (now - genHitAt < 150 ? 40 : 0);
+  // a 3/4 camera that follows me (higher and wider on a phone held upright)
+  const tall = innerHeight > innerWidth ? 1.55 : 1;
+  camOff.set(0, 21, 13).multiplyScalar(tall * (ATTRACT ? 0.68 : 1));
+  focus.lerp(P3.set(me.x * (ATTRACT ? 0.5 : 1), 0, me.z * (ATTRACT ? 0.5 : 1)), 1 - Math.pow(0.002, dt));
+  camera.position.copy(focus).add(camOff);
+  if (now - me.hurtAt < 200) camera.position.x += (Math.random() - 0.5) * 0.4;
+  camera.lookAt(focus);
+  renderer.render(scene, camera);
+  if (w && now - lastHud > 100) { lastHud = now; hud(w); }
+  requestAnimationFrame(frame);
+}
+
+(async function start() {
+  net = await connect();
+  net.onState((st) => { S = st; });
+  net.on("hit", (msg, from) => { if (host.acting && msg && typeof msg.z === "number") applyHit(msg.z, 1, from); });
+  net.on("bite", (msg) => { if (msg && msg.to === net.sessionId) applyBite(Math.min(100, Number(msg.d) || 0)); });
+  net.on("again", () => { if (host.acting) host.again = true; });
+  net.onDisconnect(() => { $("net").textContent = "Reconnecting…"; });
+  if (!net.offline && typeof MP !== "undefined") board = MP.auth({ key: MP_CONNECT.key, apiUrl: MP_CONNECT.apiUrl }).leaderboard(CONFIG.board);
+  const taken = new Set(Object.entries(S.entities.players || {}).filter(([id]) => id !== net.sessionId).map(([, p]) => p.c));
+  me.id = net.sessionId; me.color = COLORS.find((c) => !taken.has(c)) || COLORS[Math.floor(Math.random() * COLORS.length)];
+  net.me.set({ n: myName, c: me.color, hb: Date.now() });
+  if (ATTRACT) Object.assign(CONFIG, { team: 3, startWave: 6, firstBreak: 200, breakMs: 1200, spawnEvery: 0.08, spawnRadius: 17, waveSize: 50, genHp: 999 });
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

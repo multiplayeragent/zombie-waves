@@ -1,0 +1,21 @@
+{
+  "name": "Zombie Waves",
+  "genre": "shooter",
+  "dim": "3D",
+  "mode": "Co-op",
+  "players": "1–4",
+  "hook": "Hold the base against bigger and bigger waves.",
+  "how": "Zombies come from every side, more each wave, and go for the generator when nobody is in their way. Shoot them down, stand next to a friend who goes down to get them back up, and keep the generator running.",
+  "controls": "WASD and mouse, or two thumb sticks",
+  "uses": [
+    ["Leaderboard", "The highest wave each player reached."],
+    ["Host-run rules", "The host's browser moves every zombie and runs the waves; if it leaves, the next player takes over."],
+    ["Bots", "AI teammates fill the squad until enough people join."],
+    ["Live sync", "Every survivor, zombie and shot shows up for everyone at once."]
+  ],
+  "ideas": [
+    "Add a boss zombie every fifth wave",
+    "Let players build barricades between waves",
+    "Make it aliens on a moon base"
+  ]
+}
