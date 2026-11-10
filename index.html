@@ -27,7 +27,7 @@
   #hurt { position: fixed; inset: 0; pointer-events: none; box-shadow: inset 0 0 140px #ff1f3d; opacity: 0; transition: opacity .35s; }
   #over { position: fixed; inset: 0; display: grid; place-items: center; background: #050a0cb0; }
   #over[hidden], .stick[hidden] { display: none; }
-  .card { width: min(360px, 90vw); max-height: 86vh; overflow: auto; padding: 20px; border-radius: 16px; background: #16211f; border: 1px solid #ffffff2a; text-align: center; }
+  .card { box-sizing: border-box; width: min(402px, calc(100vw - 32px)); max-height: 86vh; overflow: auto; padding: 20px; border-radius: 16px; background: #16211f; border: 1px solid #ffffff2a; text-align: center; }
   .card h2 { margin: 0; font-size: 26px; color: #ff6b6b; } .card h3 { margin: 14px 0 4px; font-size: 13px; color: #9ffff0; text-align: left; }
   .card ol { margin: 0; padding-left: 24px; font-size: 14px; text-align: left; }
   .card li span { float: right; font-variant-numeric: tabular-nums; } .card li.mine { color: #ffd166; font-weight: 700; }
@@ -703,11 +703,11 @@ function syncSurvivors(dt, t) {
   if (!me.g) { me.g = makeSurvivor(me.color, ""); me.g.userData.color = me.color; }
   poseSurvivor(me.g, me, t);
 }
-/** Two people in one color: the one with the higher sessionId picks a free color. */
+/** Two people in one color: the one with the higher sessionId picks a color no person or bot has (a bot in a person's color is recolored by the host). */
 function fixColor() {
   const others = Object.entries(S.entities.players || {}).filter(([id]) => id !== net.sessionId);
   if (!others.some(([id, p]) => p.c === me.color && id < net.sessionId)) return;
-  const taken = new Set(others.map(([, p]) => p.c)), free = COLORS.find((c) => !taken.has(c));
+  const taken = new Set([...others.map(([, p]) => p.c), ...botList().map((b) => b.color)]), free = COLORS.find((c) => !taken.has(c));
   if (free) { me.color = free; net.me.set("c", free); }
 }
 
@@ -716,6 +716,7 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 let board = null, lastGen = CONFIG.genHp, genHitAt = 0;
 const startedAt = performance.now();
+let dropped = false; // true while the connection is down: the HUD keeps showing "Reconnecting…"
 function hud(w) {
   const b = baseNow(), now = performance.now(), t = Date.now();
   if (b.hp < lastGen) genHitAt = now;
@@ -734,7 +735,7 @@ function hud(w) {
   const touch = matchMedia("(pointer: coarse)").matches;
   $("hint").textContent = now - startedAt < 9000 ? (touch ? "Left thumb moves · right thumb aims and shoots · stand by a downed friend to revive" : "WASD to move · aim with the mouse · hold click to shoot · stand by a downed friend to revive") : "";
   const n = livePlayers().length;
-  $("net").textContent = net.offline ? "Offline: playing with bots" : `Online · ${n} player${n === 1 ? "" : "s"}${isHost() ? " · you run the zombies" : ""}`;
+  $("net").textContent = net.offline ? "Offline: playing with bots" : dropped ? "Reconnecting…" : `Online · ${n} player${n === 1 ? "" : "s"}${isHost() ? " · you run the zombies" : ""}`;
   $("over").hidden = w.phase !== "over";
   if (w.phase === "over") {
     $("overSub").textContent = `You held out until wave ${w.n}.`;
@@ -804,7 +805,7 @@ function readInput() {
 let last = performance.now(), lastHb = 0, lastHud = 0;
 const focus = new THREE.Vector3(), camOff = new THREE.Vector3();
 function frame(now) {
-  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  const dt = Math.max(0, Math.min(0.05, (now - last) / 1000)); last = now; // never negative: the first frame can be stamped before `last`
   const t = now / 1000;
   if (now - lastHb > 1000) { lastHb = now; net.me.set("hb", Date.now()); fixColor(); }
   if (isHost()) hostTick(dt, now); else host.acting = false;
@@ -837,9 +838,10 @@ function frame(now) {
   net.on("hit", (msg, from) => { if (host.acting && msg && typeof msg.z === "number") applyHit(msg.z, 1, from); });
   net.on("bite", (msg) => { if (msg && msg.to === net.sessionId) applyBite(Math.min(100, Number(msg.d) || 0)); });
   net.on("again", () => { if (host.acting) host.again = true; });
-  net.onDisconnect(() => { $("net").textContent = "Reconnecting…"; });
+  net.onDisconnect(() => { dropped = true; $("net").textContent = "Reconnecting…"; });
+  net.onReconnect(() => { dropped = false; });
   if (!net.offline && typeof MP !== "undefined") board = MP.auth({ key: MP_CONNECT.key, apiUrl: MP_CONNECT.apiUrl }).leaderboard(CONFIG.board);
-  const taken = new Set(Object.entries(S.entities.players || {}).filter(([id]) => id !== net.sessionId).map(([, p]) => p.c));
+  const taken = new Set([...Object.entries(S.entities.players || {}).filter(([id]) => id !== net.sessionId).map(([, p]) => p.c), ...readBots().map((b) => b.color)]);
   me.id = net.sessionId; me.color = COLORS.find((c) => !taken.has(c)) || COLORS[Math.floor(Math.random() * COLORS.length)];
   net.me.set({ n: myName, c: me.color, hb: Date.now() });
   if (ATTRACT) Object.assign(CONFIG, { team: 3, startWave: 6, firstBreak: 200, breakMs: 1200, spawnEvery: 0.08, spawnRadius: 17, waveSize: 50, genHp: 999 });
