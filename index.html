@@ -723,7 +723,7 @@ function hud(w) {
   const b = baseNow(), now = performance.now(), t = Date.now();
   if (b.hp < lastGen) genHitAt = now;
   lastGen = b.hp;
-  $("hurt").style.opacity = now - me.hurtAt < 250 ? 0.8 : me.down ? 0.45 : 0;
+  $("hurt").style.opacity = ATTRACT ? 0 : now - me.hurtAt < 250 ? 0.8 : me.down ? 0.45 : 0;
   if (ATTRACT) { for (const id of ["wave", "team", "msg", "hint", "net", "meText"]) $(id).textContent = ""; $("gen").style.display = $("me").style.display = "none"; return; }
   const left = zombieList().length + (b.queue || 0);
   $("wave").innerHTML = `Wave ${w.n}<small>${w.phase === "fight" ? `${left} zombie${left === 1 ? "" : "s"} left` : w.phase === "break" ? "Get ready" : ""}</small>`;
@@ -742,7 +742,7 @@ function hud(w) {
   if (w.phase === "over") {
     $("overSub").textContent = `You held out until wave ${w.n}.`;
     $("results").innerHTML = team().map((s) => ({ s, k: b.kills?.[s.id] || 0 })).sort((x, y) => y.k - x.k)
-      .map(({ s, k }) => `<li class="${s === me ? "mine" : ""}">${esc(s === me ? myName : s.name)}<span>${k} kills</span></li>`).join("");
+      .map(({ s, k }) => `<li class="${s === me ? "mine" : ""}">${esc(s === me ? myName : s.name)}<span>${k} kill${k === 1 ? "" : "s"}</span></li>`).join("");
     $("next").textContent = `New game in ${Math.max(0, Math.ceil((w.endsAt - t) / 1000))}s`;
     if (me.submittedFor !== w.id) { me.submittedFor = w.id; showBoard(w.n); }
   }
@@ -764,12 +764,13 @@ addEventListener("keydown", (e) => { const k = e.key.toLowerCase(); if (MOVE[k] 
 addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
 addEventListener("blur", () => { keys.clear(); mouse.down = false; });
 addEventListener("pointerdown", () => { try { audio ||= new AudioContext(); } catch {} }, { once: true });
+addEventListener("contextmenu", (e) => e.preventDefault()); // no right-click menu over the game
 const cv = renderer.domElement;
 // Twin thumb sticks: touch the left half to move, the right half to aim (and shoot).
 const sticks = { move: null, aim: null };
 cv.addEventListener("pointerdown", (e) => {
   e.preventDefault();
-  if (e.pointerType === "mouse") { if (e.button === 0) mouse.down = true; return; }
+  if (e.pointerType === "mouse") { mouse.x = e.clientX; mouse.y = e.clientY; mouse.seen = true; if (e.button === 0) mouse.down = true; return; }
   const side = e.clientX < innerWidth / 2 ? "move" : "aim";
   if (sticks[side]) return;
   sticks[side] = { id: e.pointerId, x0: e.clientX, y0: e.clientY, dx: 0, dy: 0, el: $(side === "move" ? "stickMove" : "stickAim") };
@@ -849,7 +850,8 @@ function frame(now) {
   const taken = new Set([...Object.entries(S.entities.players || {}).filter(([id]) => id !== net.sessionId).map(([, p]) => p.c), ...readBots().map((b) => b.color)]);
   me.id = net.sessionId; me.color = COLORS.find((c) => !taken.has(c)) || COLORS[Math.floor(Math.random() * COLORS.length)];
   net.me.set({ n: myName, c: me.color, hb: Date.now() });
-  if (ATTRACT) Object.assign(CONFIG, { team: 3, startWave: 6, firstBreak: 200, breakMs: 1200, spawnEvery: 0.08, spawnRadius: 17, waveSize: 50, genHp: 999 });
+  // the preview: a big wave close in, sharper bots, and a small generator so a lost game restarts within seconds (never a minute of everyone lying down)
+  if (ATTRACT) Object.assign(CONFIG, { team: 3, startWave: 4, firstBreak: 200, breakMs: 1200, spawnEvery: 0.08, spawnRadius: 17, waveSize: 30, botFireRate: 5, genHp: 40, resultsMs: 2500 });
   requestAnimationFrame(frame);
 })();
 </script>
