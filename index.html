@@ -40,6 +40,7 @@
     #gen { top: calc(max(12px, env(safe-area-inset-top)) + 58px); left: 16px; transform: none; width: 130px; text-align: left; }
     #team { width: 140px; font-size: 12px; } #msg { font-size: 30px; }
     #me { bottom: calc(max(18px, env(safe-area-inset-bottom)) + 24px); }
+    #hint { bottom: calc(max(18px, env(safe-area-inset-bottom)) + 84px); padding: 0 12px; font-size: 14px; } /* above the raised health bar */
   }
 </style>
 <script src="https://cdn.multiplayeragent.com/sdk/mp.global.js"></script>
@@ -90,9 +91,10 @@
  *       `bots`  the AI teammates, 10 times a second
  *     A new host adopts all of it from state and carries on: same wave, same zombies.
  *   - You shoot on your own screen. When your bullet hits a zombie you send a `hit` intent
- *     {z: zombie id}; the host takes the health off (and applies its own hits directly).
+ *     {z: zombie id}; the host checks it (takeHit: a live player who is up, no faster than a gun fires),
+ *     takes the health off (and applies its own hits directly).
  *   - Zombies bite by event: the host sends `bite` {to, d} (the damage of the last 250ms) and
- *     only the bitten player takes it off its own health. The host bites bots directly.
+ *     only the bitten player takes it off its own health (and only from the host). The host bites bots directly.
  *   - Downed? A teammate standing next to you for a few seconds gets you up. You check that
  *     yourself, from everyone's positions in state. Every new wave gets everyone back up.
  *   - `again` (intent): a player pressed Play again on the results card.
@@ -461,7 +463,7 @@ function sfx(kind) {
 
 // ── WAVES (HOST) ────────────────────────────────────────────────────────────────────
 const host = { acting: false, last: null, zombies: new Map(), nextId: 0, gen: CONFIG.genHp, queue: 0, kills: {}, bots: new Map(),
-  spawnIn: 0, lastZ: 0, lastBots: 0, lastBase: 0, lastBite: 0, baseDirty: false, again: false, written: [], bites: {} };
+  spawnIn: 0, lastZ: 0, lastBots: 0, lastBase: 0, lastBite: 0, baseDirty: false, again: false, written: [], bites: {}, hitBudget: new Map() };
 /** The wave as state has it, or the host's own newer write that hasn't come back yet. `v` only goes up. */
 function wave() {
   const w = parseOnce("wave", S.shared.wave, null);
@@ -550,6 +552,17 @@ function applyHit(id, d, by) {
   if (!z) return;
   z.hp -= d;
   if (z.hp <= 0) { host.zombies.delete(id); host.kills[by] = (host.kills[by] || 0) + 1; host.baseDirty = true; }
+}
+/** A teammate's `hit` intent. The host checks it first: a live player who is up, during a wave, and no faster than
+ *  their gun fires (a few to spare for the network bunching messages up). */
+function takeHit(msg, from) {
+  const w = wave(), now = performance.now(), s = team().find((o) => o.id === from && !o.bot && o !== me);
+  if (!host.acting || !w || w.phase !== "fight" || !msg || !Number.isInteger(msg.z) || !s || s.down) return;
+  const b = host.hitBudget.get(from) || { n: 6, at: now };
+  b.n = Math.min(6, b.n + (now - b.at) / 1000 * CONFIG.fireRate * 1.25); b.at = now; host.hitBudget.set(from, b);
+  if (b.n < 1) return;
+  b.n--;
+  applyHit(msg.z, 1, from);
 }
 /** Downed survivor `s` gets back up after a teammate stands next to it for reviveTime. */
 function reviveTick(s, everyone, dt) {
@@ -842,8 +855,8 @@ function frame(now) {
 (async function start() {
   net = await connect();
   net.onState((st) => { S = st; });
-  net.on("hit", (msg, from) => { if (host.acting && msg && typeof msg.z === "number") applyHit(msg.z, 1, from); });
-  net.on("bite", (msg) => { if (msg && msg.to === net.sessionId) applyBite(Math.min(100, Number(msg.d) || 0)); });
+  net.on("hit", takeHit);
+  net.on("bite", (msg, from) => { if (msg && msg.to === net.sessionId && from === livePlayers()[0] && from !== net.sessionId) applyBite(Math.max(0, Math.min(100, Number(msg.d) || 0))); }); // only the host bites
   net.on("again", () => { if (host.acting) host.again = true; });
   net.onDisconnect(() => { dropped = true; $("net").textContent = "Reconnecting…"; });
   net.onReconnect(() => { dropped = false; });
